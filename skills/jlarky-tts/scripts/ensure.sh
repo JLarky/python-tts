@@ -8,6 +8,8 @@ REPO_URL="${PYTHON_TTS_REPO:-https://github.com/JLarky/python-tts.git}"
 HOME_DIR="${PYTHON_TTS_HOME:-${HOME}/.local/share/python-tts}"
 MIN_MAJOR=3
 MIN_MINOR=10
+# Resolve before any cd so relative invocations still work under set -e.
+ENSURE_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/ensure.sh" || ENSURE_PATH="${BASH_SOURCE[0]}"
 
 die() {
   printf '%s\n' "$*" >&2
@@ -60,5 +62,32 @@ fi
   || die "edge_tts import failed after install; try removing ${HOME_DIR}/.venv and re-running."
 
 [[ -x "${HOME_DIR}/tts" ]] || die "tts wrapper missing at ${HOME_DIR}/tts"
+
+# Non-blocking outdated hint (stdout still prints the tts path; exit 0).
+hint_if_outdated() {
+  local local_sha remote_sha depth=()
+  # Best-effort fetch; offline / auth prompt / no remote = skip.
+  # Only pass --depth 1 when already shallow so a full PYTHON_TTS_HOME
+  # checkout (dev override) is not truncated.
+  if [[ "$(git -C "${HOME_DIR}" rev-parse --is-shallow-repository 2>/dev/null || true)" == true ]]; then
+    depth=(--depth 1)
+  fi
+  # Avoid hanging on credential prompts when ensure is captured as TTS=$(...).
+  GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -oBatchMode=yes" \
+    git -C "${HOME_DIR}" fetch --quiet ${depth[@]+"${depth[@]}"} origin main >/dev/null 2>&1 || return 0
+  local_sha="$(git -C "${HOME_DIR}" rev-parse --short HEAD 2>/dev/null || true)"
+  remote_sha="$(git -C "${HOME_DIR}" rev-parse --short origin/main 2>/dev/null || true)"
+  if [[ -z "${local_sha}" || -z "${remote_sha}" || "${local_sha}" == "${remote_sha}" ]]; then
+    return 0
+  fi
+  printf '%s\n' \
+    "hint: python-tts is outdated (local ${local_sha}, origin/main ${remote_sha})." \
+    "hint: update when convenient:" \
+    "hint:   git -C ${HOME_DIR} pull --ff-only" \
+    "hint:   rm -f ${HOME_DIR}/.venv/.requirements.stamp && bash ${ENSURE_PATH}" \
+    "hint: if a server is running, stop it first (${HOME_DIR}/tts --stop), then restart with --server after updating." \
+    >&2
+}
+hint_if_outdated
 
 printf '%s\n' "${HOME_DIR}/tts"

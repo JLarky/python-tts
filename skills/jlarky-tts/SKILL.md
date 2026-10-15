@@ -31,13 +31,15 @@ TTS=$(bash "$SKILL_DIR/scripts/ensure.sh")
 
 **Windows:** not supported natively (bash wrapper + `.venv/bin`). Use WSL, or tell the user.
 
-**Updates:** do not `git pull` on every run. Only when the user asks or something is broken:
+**Updates:** `ensure.sh` may print a non-blocking `hint: python-tts is outdated…` on stderr. Do **not** fail the run for that — the user may not care. If they want current flags/behavior (or you need a feature the old install lacks): `"$TTS" --stop`, then:
 
 ```bash
 git -C "${PYTHON_TTS_HOME:-$HOME/.local/share/python-tts}" pull --ff-only
 rm -f "${PYTHON_TTS_HOME:-$HOME/.local/share/python-tts}/.venv/.requirements.stamp"
 bash "$SKILL_DIR/scripts/ensure.sh"
 ```
+
+Then start again with `--server`. Do not auto-pull on every ensure unless the user asks.
 
 ## Browser listen (default for “read this aloud”)
 
