@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import edge_tts
 from aiohttp import web
@@ -32,6 +32,7 @@ DEFAULT_CHUNK_CHARS = 1400
 DEFAULT_VOICE = "en-US-EmmaMultilingualNeural"
 DEFAULT_LISTEN = "127.0.0.1"
 DEFAULT_HOSTNAME = "localhost"
+REPO_URL = "https://github.com/JLarky/python-tts"
 
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 WHITESPACE = re.compile(r"\s+")
@@ -630,9 +631,24 @@ class PairingHub:
                 pass
 
 
-def pair_forbidden_page(port: int, code_display: str) -> str:
+# Literal paths for help pages — do not expand $HOME (avoids leaking username on LAN).
+TTS_HOME_EXPR = '"${PYTHON_TTS_HOME:-$HOME/.local/share/python-tts}"'
+TTS_BIN_EXPR = f'{TTS_HOME_EXPR}/tts'
+
+
+def pair_forbidden_page(port: int, code_display: str, *, for_index: bool = False) -> str:
     code = html.escape(code_display)
-    cmd = html.escape(f"tts --pair {code_display}")
+    cmd = html.escape(f"{TTS_BIN_EXPR} --pair {code_display}")
+    after = (
+        "Then reload this page to see the player list."
+        if for_index
+        else "Then reload this page."
+    )
+    alt = (
+        "<p>Or open the <code>http://…?token=…</code> URL printed by the CLI.</p>"
+        if for_index
+        else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
@@ -645,7 +661,49 @@ def pair_forbidden_page(port: int, code_display: str) -> str:
 <p>On the machine running the TTS server (port {port}), run:</p>
 <pre><code>{cmd}</code></pre>
 <p>Pairing code: <strong><code>{code}</code></strong></p>
-<p>Then reload this page.</p>
+<p>{after}</p>
+{alt}
+<p><small>Project: <a href="{html.escape(REPO_URL)}">{html.escape(REPO_URL)}</a></small></p>
+</main>
+"""
+
+
+def root_index_page(port: int, out_dir: Path) -> str:
+    """Authenticated GET / — list player HTML files under out_dir."""
+    items: list[str] = []
+    try:
+        candidates = [
+            p
+            for p in out_dir.glob("*.html")
+            if p.is_file() and not p.name.startswith(".") and p.suffix == ".html"
+        ]
+    except OSError:
+        candidates = []
+
+    def _mtime(path: Path) -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    for path in sorted(candidates, key=_mtime, reverse=True):
+        name = html.escape(path.name)
+        href = html.escape("/" + quote(path.name))
+        items.append(f'<li><a href="{href}"><code>{name}</code></a></li>')
+    body = "\n".join(items) if items else "<li><em>No player pages yet.</em></li>"
+    tts_bin = html.escape(TTS_BIN_EXPR)
+    return f"""<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>python-tts players</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+<main class="container">
+<h1>Players</h1>
+<p>Port {port}. Newest first.</p>
+<ul>{body}</ul>
+<pre><code>{tts_bin} --stop</code></pre>
+<p><a href="{html.escape(REPO_URL)}">{html.escape(REPO_URL)}</a></p>
 </main>
 """
 
@@ -654,15 +712,36 @@ def make_server_app(hub: PairingHub) -> web.Application:
     root = hub.root
     token = hub.token
 
+    def root_index_response(*, set_session: bool = False) -> web.Response:
+        resp = web.Response(
+            status=200,
+            text=root_index_page(hub.port, root),
+            content_type="text/html",
+            charset="utf-8",
+            headers=SECURITY_HEADERS,
+        )
+        if set_session:
+            resp.set_cookie(
+                hub.cookie_name,
+                token,
+                httponly=True,
+                samesite="Strict",
+                path="/",
+            )
+            resp.del_cookie(hub.pair_cookie_name, path="/")
+        return resp
+
     @web.middleware
     async def auth_middleware(request: web.Request, handler):
         q_token = request.rel_url.query.get("token")
         from_query = token_ok(q_token, token)
         from_cookie = token_ok(request.cookies.get(hub.cookie_name), token)
+        is_root = request.path == "/"
 
         if from_query or from_cookie:
             if from_query:
-                location = safe_redirect_location(root, request.path)
+                # Drop ?token= from the address bar (same pattern as .html).
+                location = "/" if is_root else safe_redirect_location(root, request.path)
                 if location is None:
                     return web.Response(
                         status=404, text="Not Found", headers=SECURITY_HEADERS
@@ -680,6 +759,9 @@ def make_server_app(hub: PairingHub) -> web.Application:
                 resp.del_cookie(hub.pair_cookie_name, path="/")
                 return resp
 
+            if is_root and request.method in ("GET", "HEAD"):
+                return root_index_response()
+
             response = await handler(request)
             for key, value in SECURITY_HEADERS.items():
                 response.headers.setdefault(key, value)
@@ -689,10 +771,11 @@ def make_server_app(hub: PairingHub) -> web.Application:
         pending_id = request.cookies.get(hub.pair_cookie_name)
         approved = await hub.take_approved(pending_id)
         if approved is not None:
+            if is_root and request.method in ("GET", "HEAD"):
+                return root_index_response(set_session=True)
             location = safe_redirect_location(root, request.path)
             if location is None:
                 location = "/"
-                # Only redirect to a real file when possible.
                 loc = safe_redirect_location(root, approved.path)
                 if loc is not None:
                     location = loc
@@ -709,15 +792,17 @@ def make_server_app(hub: PairingHub) -> web.Application:
             resp.del_cookie(hub.pair_cookie_name, path="/")
             return resp
 
-        # HTML gets a pairing page; everything else stays opaque 403.
-        if request.method == "GET" and is_html_path(request.path):
+        # `/` and `.html` get a pairing page; everything else stays opaque 403.
+        if request.method == "GET" and (is_root or is_html_path(request.path)):
             entry = await hub.get_or_create_pending(
                 pending_id,
                 request.remote or "-",
                 request.headers.get("User-Agent", "-"),
                 request.path,
             )
-            body = pair_forbidden_page(hub.port, entry.code_display)
+            body = pair_forbidden_page(
+                hub.port, entry.code_display, for_index=is_root
+            )
             resp = web.Response(
                 status=403,
                 text=body,
