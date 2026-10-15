@@ -10,18 +10,19 @@ This repo is a small personal CLI around Microsoft Edge online TTS (`edge-tts`).
 
 ## Using the CLI (read this if you're just running `./tts`)
 
-**If the user wants to listen in a browser, use `--start-server`.** Opening `file://` HTML often fails to play audio. Give the user the printed `http://…?token=…` URL, not the file path.
+**If the user wants to listen in a browser, use `--server`.** Opening `file://` HTML often fails to play audio. Give the user the printed `http://…?token=…` URL, not the file path.
 
 ```bash
-./tts --start-server -t "Text to read" -p demo
-# or: ./tts --start-server -f notes.md -p notes
+./tts --server -t "Text to read" -p demo
+# or: ./tts --server -f notes.md -p notes
 ```
 
-- The command **does not exit** after synthesis; it serves until Ctrl+C. Start it in the background (non-blocking shell or a tmux pane), wait for the `http://` line on stdout, hand that URL to the user, and leave the process running while they listen.
+- Wait for the `http://` line on stdout, hand that URL to the user, then you’re done. Stop later with `./tts --stop`.
+- `--server` reuses a live server for the same `--out-dir`+`--listen` when possible; `--start-server` always starts a new one.
 - The URL works right away. The page fills in clips as each one finishes.
 - To reach it from another device on the LAN: `--listen 0.0.0.0 --hostname <machine-name-or-ip>`.
-- Leave out `--start-server` only when the user wants MP3 files (scripts, copying, other players). In that case the command prints paths and exits.
-- The token is per run, so a URL stops working once the process is stopped.
+- Leave out `--server` only when the user wants MP3 files (scripts, copying, other players).
+- A token URL stops working once that server is stopped.
 
 ## Layout
 
@@ -44,12 +45,12 @@ No package layout, tests, or build system beyond the venv.
 5. For each chunk: `edge_tts.Communicate(chunk, voice).save(...)`, print absolute MP3 path, rewrite HTML with current clips.
 6. While `ready < expected`, HTML includes `<meta http-equiv="refresh" content="2">` and a “Generating… k/N” note. When done, refresh stops and “Play all” chains `<audio>` elements via `ended`.
 7. Default voice: `en-US-EmmaMultilingualNeural`. Default out dir: `/tmp/tts`.
-8. Optional `--start-server [PORT]` (PORT omitted → OS free port): aiohttp serves only `.html`/`.mp3` under `out_dir`. Auth is one per-run `secrets.token_urlsafe(32)` checked with `hmac.compare_digest` from `?token=` or cookie `tts_<port>`. Valid query → `303` to the same path + `Set-Cookie` (HttpOnly, SameSite=Strict, Path=/; no `Secure` — plain HTTP). Unauthenticated → `403` before path resolution. Access logs must not include the query string. Defaults: `--listen 127.0.0.1`, `--hostname localhost`. Warn on stderr when binding `0.0.0.0`/`::`. After synthesis, block until Ctrl+C. Stdout: HTML path, then `http://{hostname}:{port}/{file}?token=…`, then MP3 paths.
+8. Optional `--server [PORT]` / `--start-server [PORT]`: serve `--out-dir` over HTTP. `--server` reuses a live daemon for the same resolved `--out-dir`+`--listen` when possible; `--start-server` always starts new. Background state under `$XDG_RUNTIME_DIR/python-tts/` or `~/.local/state/python-tts/`. `--stop [--port N]` stops daemons. Auth: per-server `secrets.token_urlsafe(32)` via `?token=` or cookie; HTML 403 pairing via `tts --pair CODE`. Stdout: HTML path, then `http://…?token=…`, then MP3 paths. Without server: stderr `hint: rerun with --server`.
 
 ## Conventions for changes
 
 - Keep everything in `tts.py` unless there is a strong reason to split.
-- Preserve progressive HTML updates and stdout contract: HTML path first, then (if server) HTTP URL, then one MP3 path per line as each clip finishes (`flush=True`). Hints go to stderr only (file:// tip when no server; “keep running” when serving).
+- Preserve progressive HTML updates and stdout contract: HTML path first, then (if server) HTTP URL, then one MP3 path per line as each clip finishes (`flush=True`). No-server hint is only `hint: rerun with --server` on stderr.
 - HTML uses Pico CSS from jsDelivr and inline play-all JS — keep it self-contained (no build step). Do not embed the token in HTML; cookie covers `<audio>` requests.
 - Escape user text with `html.escape` in the player page.
 - Prefer small, dependency-light changes; only add packages if clearly needed. `aiohttp` is imported directly (already pulled in by `edge-tts`) for Range-capable `FileResponse`.
@@ -62,9 +63,9 @@ No package layout, tests, or build system beyond the venv.
 ./tts -t "ping" -o /tmp/tts -p agent-smoke
 # Expect: one .html path, then one .mp3 path; open HTML and confirm a single clip.
 
-./tts --start-server -t "http ping" -o /tmp/tts -p agent-http
+./tts --server -t "http ping" -o /tmp/tts -p agent-http
 # Expect: .html path, then http://localhost:<port>/…?token=…, then .mp3 path.
-# curl without token → 403; curl -L with token → 200 HTML; MP3 also 403 without cookie/token.
+# Second --server with same -o should stderr "reusing server on port …".
 ```
 
 Needs network access for Edge TTS. If `.venv` is missing: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`.
