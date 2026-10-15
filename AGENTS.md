@@ -31,7 +31,7 @@ This repo is a small personal CLI around Microsoft Edge online TTS (`edge-tts`).
 | `tts` | Thin bash wrapper: runs `$ROOT/.venv/bin/python $ROOT/tts.py "$@"`. |
 | `requirements.txt` | `edge-tts>=7.3.0` (+ `aiohttp`). |
 | `.venv/` | Local virtualenv (gitignored). Assume it exists when using `./tts`. |
-| `skills/tts/` | vercel-labs-style agent skill (`SKILL.md` + `scripts/ensure.sh`) for `npx skills add JLarky/python-tts`. |
+| `skills/jlarky-tts/` | vercel-labs-style agent skill (`name: jlarky-tts`) for `npx skills add JLarky/python-tts`. |
 
 No package layout, tests, or build system beyond the venv.
 

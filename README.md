@@ -19,9 +19,11 @@ Coding agents can install usage instructions with:
 
 ```bash
 npx skills add JLarky/python-tts
+# or explicitly:
+npx skills add JLarky/python-tts --skill jlarky-tts
 ```
 
-That skill tells the agent to clone this repo into `~/.local/share/python-tts` (override with `PYTHON_TTS_HOME`) via `skills/tts/scripts/ensure.sh`, then run that `tts` binary—preferring `--start-server` for browser playback.
+That skill (`jlarky-tts`) tells the agent to clone this repo into `~/.local/share/python-tts` (override with `PYTHON_TTS_HOME`) via `skills/jlarky-tts/scripts/ensure.sh`, then run that `tts` binary—preferring `--start-server` for browser playback. If you previously installed it as `tts`, remove the stale skill (`npx skills remove tts`) and re-add.
 
 ## Usage
 

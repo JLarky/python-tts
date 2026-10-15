@@ -1,5 +1,5 @@
 ---
-name: tts
+name: jlarky-tts
 description: >-
   Turn text into spoken audio with Microsoft Edge neural TTS (read aloud, speak
   this, text-to-speech, make an MP3 of, listen to this). Not for speech-to-text
@@ -7,7 +7,7 @@ description: >-
   prefers --start-server for browser playback.
 ---
 
-# TTS (Edge neural voices)
+# jlarky-tts (Edge neural voices)
 
 Personal CLI: https://github.com/JLarky/python-tts
 
