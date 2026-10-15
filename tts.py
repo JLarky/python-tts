@@ -20,6 +20,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import cache
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
@@ -33,6 +34,7 @@ DEFAULT_VOICE = "en-US-EmmaMultilingualNeural"
 DEFAULT_LISTEN = "127.0.0.1"
 DEFAULT_HOSTNAME = "localhost"
 REPO_URL = "https://github.com/JLarky/python-tts"
+__version__ = "0.2.0"
 
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 WHITESPACE = re.compile(r"\s+")
@@ -636,6 +638,27 @@ TTS_HOME_EXPR = '"${PYTHON_TTS_HOME:-$HOME/.local/share/python-tts}"'
 TTS_BIN_EXPR = f'{TTS_HOME_EXPR}/tts'
 
 
+@cache
+def app_version_label() -> str:
+    """Semver plus short git SHA when available. Cached for the process lifetime."""
+    label = __version__
+    try:
+        root = Path(__file__).resolve().parent
+        proc = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=1,
+            check=False,
+        )
+        sha = proc.stdout.strip()
+        if proc.returncode == 0 and sha:
+            label = f"{__version__}+{sha}"
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return label
+
+
 def pair_forbidden_page(port: int, code_display: str, *, for_index: bool = False) -> str:
     code = html.escape(code_display)
     cmd = html.escape(f"{TTS_BIN_EXPR} --pair {code_display}")
@@ -692,6 +715,7 @@ def root_index_page(port: int, out_dir: Path) -> str:
         items.append(f'<li><a href="{href}"><code>{name}</code></a></li>')
     body = "\n".join(items) if items else "<li><em>No player pages yet.</em></li>"
     tts_bin = html.escape(TTS_BIN_EXPR)
+    version = html.escape(app_version_label())
     return f"""<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
@@ -700,7 +724,7 @@ def root_index_page(port: int, out_dir: Path) -> str:
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
 <main class="container">
 <h1>Players</h1>
-<p>Port {port}. Newest first.</p>
+<p>Port {port}. Newest first. <small>v{version}</small></p>
 <ul>{body}</ul>
 <pre><code>{tts_bin} --stop</code></pre>
 <p><a href="{html.escape(REPO_URL)}">{html.escape(REPO_URL)}</a></p>
@@ -1117,6 +1141,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--list-voices",
         action="store_true",
         help="List available voices and exit",
+    )
+    p.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {app_version_label()}",
     )
     p.add_argument(
         "--server",
