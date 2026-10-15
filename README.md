@@ -13,6 +13,16 @@ python3 -m venv .venv
 
 The `./tts` script runs `tts.py` with the project venv — no need to activate it first.
 
+### Agent skill
+
+Coding agents can install usage instructions with:
+
+```bash
+npx skills add JLarky/python-tts
+```
+
+That skill tells the agent to clone this repo into `~/.local/share/python-tts` (override with `PYTHON_TTS_HOME`) via `skills/tts/scripts/ensure.sh`, then run that `tts` binary—preferring `--start-server` for browser playback.
+
 ## Usage
 
 For listening in a browser, use `--start-server` and open the printed `http://…?token=…` URL (`file://` often won’t play audio). The process keeps serving until Ctrl+C.
